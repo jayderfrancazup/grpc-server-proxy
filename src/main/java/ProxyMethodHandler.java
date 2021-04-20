@@ -26,7 +26,7 @@ public final class ProxyMethodHandler<Req, Resp> implements
     }
 
     @Override
-    //@java.lang.SuppressWarnings("unchecked")
+    @SuppressWarnings("unchecked")
     public void invoke(Req request, StreamObserver<Resp> responseObserver) {
 
         // Aqui onde ocorre o processamento da requisicao do metodo
@@ -56,8 +56,44 @@ public final class ProxyMethodHandler<Req, Resp> implements
     }
 
     @Override
-    //@java.lang.SuppressWarnings("unchecked")
+    @SuppressWarnings("unchecked")
     public StreamObserver<Req> invoke(StreamObserver<Resp> responseObserver) {
-        return null;
+        return new StreamObserver<Req>() {
+            @Override
+            public void onNext(Req req) {
+
+                Message response = null;
+                Builder builder = gRPCUtils.getBuilderFromMarshaller(descriptor.getResponseMarshaller());
+                ObjectMapper mapper = new ObjectMapper();
+                JsonFormat.Printer printer = JsonFormat.printer().omittingInsignificantWhitespace();
+                JsonFormat.Parser parser = JsonFormat.parser();
+
+                try {
+                    String data = printer.print((MessageOrBuilder) req);
+                    log.info(MessageFormat.format("Processando a requisição do cliente {0} ...", data));
+                    JsonNode json = mapper.readTree(data);
+                    JsonNode result = DataUtils.lookupResponse(json);
+                    data = mapper.writeValueAsString(result);
+                    log.info(MessageFormat.format("Enviando o resultado para o cliente: {0} ...", data));
+                    parser.merge(data, builder);
+                    assert builder != null;
+                    response = builder.build();
+                } catch (IOException ex) {
+                    log.error("Erro ao processar a requisição", ex);
+                }
+
+                responseObserver.onNext((Resp) response);
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+                log.error("Erro ao processar a requisição", throwable);
+            }
+
+            @Override
+            public void onCompleted() {
+                responseObserver.onCompleted();
+            }
+        };
     }
 }
